@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scan Receipt</title>
+    <!-- Link to Bootstrap CSS for styling -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* Styling for the expanded image view */
+        .expanded {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        /* Styling for the image within the expanded view */
+        .expanded img {
+            max-width: 90%;
+            max-height: 90%;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Styling for the delete button within the expanded view */
+        .delete-button {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+
+<div class="container py-5">
+    <!-- Main heading for the page -->
+    <h1 class="text-center mb-4">Scan and Review Receipt</h1>
+
+    <!-- Section for uploading a receipt image -->
+    <div class="card p-4 shadow-sm mb-4">
+        <h2>Upload a Receipt Image</h2>
+        <!-- Form for uploading the receipt image -->
+        <form action="{{ url_for('upload_receipt') }}" method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <div class="input-group">
+                <!-- Input field for selecting the image file -->
+                <input type="file" name="receipt_image" accept="image/*" class="form-control" required>
+                <!-- Button to submit the upload form -->
+                <button type="submit" class="btn btn-primary">Upload Scan</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Section for previewing the uploaded receipt images -->
+    {% if image_urls %}
+    <div class="card p-4 shadow-sm mb-4">
+        <h2>Uploaded Receipt Images</h2>
+        <div class="row">
+            <!-- Loop through each uploaded image URL and display it -->
+            {% for url in image_urls %}
+            <div class="col-md-4 text-center mb-3">
+                <!-- Image element with click event to toggle expanded view -->
+                <img src="{{ url }}" alt="Uploaded Receipt Image" class="img-fluid" style="max-height: 200px;" onclick="toggleImage(this, '{{ url }}')">
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Section for displaying scanned tables -->
+    {% if tables %}
+    <div class="card p-4 shadow-sm mb-4">
+        <h2>Scanned Tables</h2>
+        <div id="tables-container">
+            <!-- Loop through each scanned table and display it -->
+            {% for table in tables %}
+            <div class="mb-3">
+                <h5>Table {{ loop.index }}</h5>
+                <!-- Table element for displaying scanned items -->
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Item Name</th>
+                            <th>Price</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Loop through each row in the table -->
+                        {% for row in table %}
+                        <tr>
+                            <!-- Editable cells for item name and price -->
+                            <td contenteditable="true">{{ row[0] }}</td>
+                            <td contenteditable="true">{{ row[1] }}</td>
+                            <td>
+                                <!-- Button to remove the row -->
+                                <button class="btn btn-danger btn-sm" onclick="removeRow(this)">Remove</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        <!-- Row for adding a new item -->
+                        <tr>
+                            <td contenteditable="true">New Item</td>
+                            <td contenteditable="true">0.00</td>
+                            <td>
+                                <!-- Button to add the new item -->
+                                <button class="btn btn-success btn-sm" onclick="addRow(this)">Add</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <!-- Button to remove the entire table -->
+                <button class="btn btn-danger mb-2" onclick="removeTable(this)">Remove Table</button>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Button to add a new table -->
+    <div class="text-center mb-4">
+        <button class="btn btn-success" onclick="addTable()">Add New Table</button>
+    </div>
+
+    <!-- Form for confirming the scanned tables -->
+    <form action="{{ url_for('get_items_from_scan') }}" method="POST" onsubmit="prepareTablesForSubmission()">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <!-- Hidden input to store the tables data as JSON -->
+        <input type="hidden" name="tables_data" id="tables-data">
+        <!-- Button to submit the form -->
+        <button type="submit" class="btn btn-success">Confirm Tables</button>
+    </form>
+</div>
+
+<!-- Include Bootstrap JS for interactive components -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    /* Function to toggle the expanded view of an image */
+    function toggleImage(img, url) {
+        const expanded = document.createElement('div');
+        expanded.className = 'expanded';
+        expanded.innerHTML = `
+            <img src="${url}" alt="Expanded Image">
+            <button class="btn btn-danger delete-button">Delete</button>
+        `;
+        document.body.appendChild(expanded);
+
+        /* Event listener for the expanded view */
+        expanded.addEventListener('click', async (event) => {
+            if (event.target.classList.contains('delete-button')) {
+                // Handle delete button click
+                console.log('Delete button clicked for image:', url);
+
+                try {
+                    const response = await fetch('/delete_image', {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ image_url: url })
+                    });
+
+                    const result = await response.json();
+                    if (response.ok) {
+                        console.log(result.message);
+                        // Remove the image from the expanded view
+                        document.body.removeChild(expanded);
+                        // Remove the image from the preview section
+                        const previewImage = document.querySelector(`img[src="${url}"]`);
+                        if (previewImage) {
+                            previewImage.closest('.col-md-4').remove();
+                        }
+                    } else {
+                        console.error(result.message);
+                    }
+                } catch (error) {
+                    console.error('Error during delete request:', error);
+                }
+            } else {
+                // Close the expanded view
+                document.body.removeChild(expanded);
+            }
+        });
+    }
+
+    /* Function to remove a row from a table */
+    function removeRow(button) {
+        const row = button.closest('tr');
+        row.remove();
+    }
+
+    /* Function to add a new row to a table */
+    function addRow(button) {
+        const row = button.closest('tr');
+        const tableBody = row.closest('tbody');
+        const newRow = row.cloneNode(true);
+        newRow.querySelectorAll('td').forEach(td => td.textContent = '');
+        tableBody.insertBefore(newRow, row);
+    }
+
+    /* Function to remove a table */
+    function removeTable(button) {
+        const tableContainer = button.closest('.mb-3');
+        tableContainer.remove();
+    }
+
+    /* Function to add a new table */
+    function addTable() {
+        const container = document.getElementById('tables-container');
+        const newTable = document.createElement('div');
+        newTable.className = 'mb-3';
+        newTable.innerHTML = `
+            <h5>New Table</h5>
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Item Name</th>
+                        <th>Price</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td contenteditable="true">New Item</td>
+                        <td contenteditable="true">0.00</td>
+                        <td>
+                            <button class="btn btn-success btn-sm" onclick="addRow(this)">Add</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <button class="btn btn-danger mb-2" onclick="removeTable(this)">Remove Table</button>
+        `;
+        container.appendChild(newTable);
+    }
+
+    /* Function to prepare the tables data for submission */
+    function prepareTablesForSubmission() {
+        const tables = [];
+        const tableContainers = document.querySelectorAll('#tables-container .mb-3');
+
+        tableContainers.forEach((tableContainer) => {
+            const rows = tableContainer.querySelectorAll('tbody tr');
+            const tableData = [];
+
+            rows.forEach((row) => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length > 1) {
+                    const name = cells[0].textContent.trim();
+                    const price = parseFloat(cells[1].textContent.trim()) || 0;
+                    if (name && name !== 'New Item') {
+                        tableData.push([name, price]);
+                    }
+                }
+            });
+
+            if (tableData.length > 0) {
+                tables.push(tableData);
+            }
+        });
+
+        document.getElementById('tables-data').value = JSON.stringify(tables);
+    }
+</script>
+
+</body>
+</html>
